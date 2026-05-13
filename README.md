@@ -653,5 +653,5 @@ process_invoice.delay(invoice_id)
 Backend, AI automation & cloud engineering — production-ready systems built to scale from day one.
 
 - Website: [arhatinfo.com](https://arhatinfo.com)
-- Email: [hello@arhatinfo.com](mailto:hello@arhatinfo.com)
+- Email: [hello@arhatinfo.com](mailto:contact@arhatinfo.com)
 - Upwork: Available for projects
