@@ -18,12 +18,17 @@ urlpatterns = [
     path('admin/', admin.site.urls),
 
     # API v1
-    path('api/v1/', include(api_v1)),
+    path('api/', include(api_v1)),
+    path('api/tools/', include('apps.tools.urls')),   # ← add this
 
     # API schema & docs
     path('api/schema/',   SpectacularAPIView.as_view(),       name='schema'),
     path('api/docs/',     SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('api/redoc/',    SpectacularRedocView.as_view(url_name='schema'),   name='redoc'),
+    path('api/chatbot/', include('apps.chatbot.urls')),
+    path('api/subscriptions/', include('apps.subscriptions.urls')),
+    path('api/tools/', include('apps.tools.urls')),
+
 ]
 
 if settings.DEBUG:

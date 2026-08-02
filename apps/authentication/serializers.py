@@ -13,7 +13,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     def get_token(cls, user):
         token = super().get_token(user)
         token['email']      = user.email
-        token['full_name']  = user.full_name
+        token['name']  = user.name
         token['is_staff']   = user.is_staff
         token['is_verified']= user.is_verified
         return token
@@ -21,19 +21,19 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
     password  = serializers.CharField(write_only=True, required=True, validators=[validate_password])
-    password2 = serializers.CharField(write_only=True, required=True, label='Confirm password')
+    # password2 = serializers.CharField(write_only=True, required=True, label='Confirm password')
 
     class Meta:
         model  = User
-        fields = ('email', 'first_name', 'last_name', 'password', 'password2')
+        fields = ('email', 'name', 'last_name', 'password')
 
     def validate(self, attrs):
-        if attrs['password'] != attrs['password2']:
-            raise serializers.ValidationError({'password': "Passwords don't match."})
+        # if attrs['password'] != attrs['password2']:
+        #     raise serializers.ValidationError({'password': "Passwords don't match."})
         return attrs
 
     def create(self, validated_data):
-        validated_data.pop('password2')
+        # validated_data.pop('password2')
         return User.objects.create_user(**validated_data)
 
 
@@ -42,7 +42,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = User
-        fields = ('id', 'email', 'first_name', 'last_name', 'full_name',
+        fields = ('id', 'email', 'name', 'last_name', 'full_name',
                   'avatar', 'is_verified', 'date_joined')
         read_only_fields = ('id', 'email', 'is_verified', 'date_joined')
 

@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements/ requirements/
-ARG BUILD_ENV=local
+ARG BUILD_ENV=development
 RUN pip install --prefix=/install -r requirements/${BUILD_ENV}.txt
 
 
@@ -26,7 +26,7 @@ FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    DJANGO_SETTINGS_MODULE=config.settings.production
+    DJANGO_SETTINGS_MODULE=config.settings.development
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
@@ -43,13 +43,14 @@ COPY . .
 
 RUN mkdir -p /app/staticfiles /app/media \
     && chown -R django:django /app
+COPY --chown=django:django . .
 
 USER django
 
-EXPOSE 8000
+EXPOSE 8080
 
 CMD ["gunicorn", "config.wsgi:application", \
-     "--bind", "0.0.0.0:8000", \
+     "--bind", "0.0.0.0:8080", \
      "--workers", "4", \
      "--timeout", "120", \
      "--access-logfile", "-", \

@@ -2,12 +2,37 @@ from pathlib import Path
 from datetime import timedelta
 import dj_database_url
 from decouple import config
+import os
+import json
+import sys
+import logging
+
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+LOG_DIR = BASE_DIR / 'logs'
+os.makedirs(LOG_DIR, exist_ok=True)
 
 SECRET_KEY   = config('SECRET_KEY')
 DEBUG        = config('DEBUG', default=False, cast=bool)
 ALLOWED_HOSTS= config('ALLOWED_HOSTS', default='localhost,127.0.0.1').split(',')
+OPENAI_API_KEY = config('OPENAI_API_KEY')
+ANTHROPIC_API_KEY = config('ANTHROPIC_API_KEY')
+EMAIL_BACKEND       = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST          = config('EMAIL_HOST',          default='smtp.gmail.com')
+EMAIL_PORT          = config('EMAIL_PORT',           default=587, cast=int)
+EMAIL_USE_TLS       = config('EMAIL_USE_TLS',        default=True, cast=bool)
+EMAIL_HOST_USER     = config('EMAIL_HOST_USER',      default='')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD',  default='')
+DEFAULT_FROM_EMAIL  = config('DEFAULT_FROM_EMAIL',   default='contact@arhat.info')
+TEAM_EMAIL          = config('TEAM_EMAIL',           default='contact@arhat.info')
+STRIPE_SECRET_KEY      = config('STRIPE_SECRET_KEY')
+STRIPE_PUBLISHABLE_KEY = config('STRIPE_PUBLISHABLE_KEY')
+STRIPE_WEBHOOK_SECRET  = config('STRIPE_WEBHOOK_SECRET', default='')
+FRONTEND_URL           = config('FRONTEND_URL', default='https://arhat.info')
+GOOGLE_CLIENT_ID    = config('GOOGLE_CLIENT_ID', default='')
+DATA_UPLOAD_MAX_MEMORY_SIZE = 24 * 1024 * 1024  # 10 MB
+
 
 # ── Apps ──────────────────────────────────────────────────────────────
 DJANGO_APPS = [
@@ -34,7 +59,10 @@ THIRD_PARTY_APPS = [
 
 LOCAL_APPS = [
     'apps.core',
+    'apps.tools', 
     'apps.authentication',
+    'apps.chatbot',
+    'apps.subscriptions',
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -50,6 +78,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'apps.subscriptions.middleware.SubscriptionMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -75,11 +104,14 @@ TEMPLATES = [
 
 # ── Database ──────────────────────────────────────────────────────────
 DATABASES = {
-    'default': dj_database_url.config(
-        default=config('DATABASE_URL'),
-        conn_max_age=600,
-        conn_health_checks=True,
-    )
+    'default': {
+        'ENGINE':   'django.db.backends.postgresql',
+        'NAME':     config('DB_NAME'),
+        'USER':     config('DB_USER'),
+        'PASSWORD': config('DB_PASSWORD'),
+        'HOST':     config('DB_HOST'),        # RDS endpoint
+        'PORT':     config('DB_PORT', default='5432'),
+    }
 }
 
 # ── Auth ──────────────────────────────────────────────────────────────
@@ -131,7 +163,6 @@ CORS_ALLOWED_ORIGINS  = config('CORS_ALLOWED_ORIGINS', default='').split(',')
 CORS_ALLOW_CREDENTIALS= True
 
 # ── Celery ────────────────────────────────────────────────────────────
-CELERY_BROKER_URL         = config('CELERY_BROKER_URL',   default='redis://localhost:6379/0')
 CELERY_RESULT_BACKEND     = config('CELERY_RESULT_BACKEND',default='redis://localhost:6379/0')
 CELERY_ACCEPT_CONTENT     = ['json']
 CELERY_TASK_SERIALIZER    = 'json'
@@ -178,18 +209,125 @@ SPECTACULAR_SETTINGS = {
 }
 
 # ── Logging ───────────────────────────────────────────────────────────
+import traceback
+
+
+class CloudLoggingJSONFormatter(logging.Formatter):
+    """
+    Formats log records as JSON matching Cloud Logging's structured
+    logging spec: https://cloud.google.com/logging/docs/structured-logging
+
+    Key fields Cloud Logging recognizes natively:
+      severity   -> drives the severity filter/color in Logs Explorer
+      message    -> shown as the main log line
+      logging.googleapis.com/sourceLocation -> file/line, shown in UI
+    Everything else becomes part of jsonPayload, individually filterable
+    in Logs Explorer with e.g. jsonPayload.tool="email_gen"
+    """
+
+    LEVEL_TO_SEVERITY = {
+        'DEBUG':    'DEBUG',
+        'INFO':     'INFO',
+        'WARNING':  'WARNING',
+        'ERROR':    'ERROR',
+        'CRITICAL': 'CRITICAL',
+    }
+
+    def format(self, record):
+        payload = {
+            'severity': self.LEVEL_TO_SEVERITY.get(record.levelname, 'DEFAULT'),
+            'message':  record.getMessage(),
+            'logger':   record.name,
+            'logging.googleapis.com/sourceLocation': {
+                'file':     record.pathname,
+                'line':     str(record.lineno),
+                'function': record.funcName,
+            },
+        }
+
+        # Attach any extra fields passed via logger.error(..., extra={...})
+        # e.g. extra={'user_email': ..., 'event_type': ..., 'tool': ...}
+        reserved = {
+            'name', 'msg', 'args', 'levelname', 'levelno', 'pathname',
+            'filename', 'module', 'exc_info', 'exc_text', 'stack_info',
+            'lineno', 'funcName', 'created', 'msecs', 'relativeCreated',
+            'thread', 'threadName', 'processName', 'process', 'message',
+            'taskName',
+        }
+        for key, value in record.__dict__.items():
+            if key not in reserved:
+                try:
+                    json.dumps(value)  # only attach JSON-serializable extras
+                    payload[key] = value
+                except (TypeError, ValueError):
+                    payload[key] = str(value)
+
+        # Full stack trace — this is what makes Error Reporting pick it up
+        if record.exc_info:
+            payload['stack_trace'] = ''.join(traceback.format_exception(*record.exc_info))
+
+        return json.dumps(payload, default=str)
+
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
+
     'formatters': {
-        'verbose': {'format': '{levelname} {asctime} {module} {message}', 'style': '{'},
+        'cloud_json': {
+            '()': CloudLoggingJSONFormatter,
+        },
     },
+
     'handlers': {
-        'console': {'class': 'logging.StreamHandler', 'formatter': 'verbose'},
+        # stdout — Cloud Run captures this automatically, no file needed
+        'cloud_console': {
+            'level':     'INFO',
+            'class':     'logging.StreamHandler',
+            'stream':    sys.stdout,
+            'formatter': 'cloud_json',
+        },
     },
-    'root': {'handlers': ['console'], 'level': 'INFO'},
+
+    'root': {
+        'handlers': ['cloud_console'],
+        'level':    'INFO',
+    },
+
     'loggers': {
-        'django': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
-        'celery': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
+        'django': {
+            'handlers':  ['cloud_console'],
+            'level':     'INFO',
+            'propagate': False,
+        },
+        'django.request': {
+            'handlers':  ['cloud_console'],
+            'level':     'ERROR',
+            'propagate': False,
+        },
+        'django.security': {
+            'handlers':  ['cloud_console'],
+            'level':     'WARNING',
+            'propagate': False,
+        },
+        'celery': {
+            'handlers':  ['cloud_console'],
+            'level':     'INFO',
+            'propagate': False,
+        },
+
+        # All your apps — apps.tools.*, apps.subscriptions.*, apps.chatbot.*
+        'apps': {
+            'handlers':  ['cloud_console'],
+            'level':     'INFO',
+            'propagate': False,
+        },
+
+        # Quiet third-party noise down to WARNING so Logs Explorer isn't
+        # flooded with every HTTP call these libraries make internally
+        'stripe':  {'handlers': ['cloud_console'], 'level': 'WARNING', 'propagate': False},
+        'urllib3': {'handlers': ['cloud_console'], 'level': 'WARNING', 'propagate': False},
+        'openai':  {'handlers': ['cloud_console'], 'level': 'WARNING', 'propagate': False},
+        'httpx':   {'handlers': ['cloud_console'], 'level': 'WARNING', 'propagate': False},
     },
 }

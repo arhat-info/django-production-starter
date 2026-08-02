@@ -18,7 +18,9 @@ except ImportError:
     pass
 
 # ── Email: print to console ───────────────────────────────────────────
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 
 # ── Relax CORS in dev ─────────────────────────────────────────────────
 CORS_ALLOW_ALL_ORIGINS = True
+
+

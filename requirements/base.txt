@@ -37,3 +37,16 @@ sentry-sdk[django]==1.45.0
 # ── Celery monitoring — needed in ALL environments ────────────────────
 flower==2.0.1
 
+reportlab==4.2.2
+python-whois==0.9.4
+dnspython==2.6.1
+user-agents==2.2.0
+requests==2.31.0
+
+pypdf==4.2.0
+pikepdf==9.0.0
+openai==2.40.0
+stripe==15.2.0
+
+
+
