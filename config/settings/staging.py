@@ -9,6 +9,16 @@ from decouple import config
 
 DEBUG = False
 
+# ── Sentry ────────────────────────────────────────────────────────────
+SENTRY_DSN = config('SENTRY_DSN', default='')
+if SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        integrations=[DjangoIntegration(), CeleryIntegration()],
+        environment='staging',
+        traces_sample_rate=1.0,   # capture 100% of transactions in staging
+        send_default_pii=True,
+    )
 
 # ── Security ──────────────────────────────────────────────────────────
 SESSION_COOKIE_SECURE   = True
@@ -18,61 +28,14 @@ SECURE_HSTS_SECONDS     = 3600
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 
 # ── Static/Media via S3 ───────────────────────────────────────────────
-
-from .base import *
-import os
-
-DEBUG = False
-
-# Lambda sets AWS_LAMBDA_FUNCTION_NAME in the environment
-IS_LAMBDA = bool(os.environ.get('AWS_LAMBDA_FUNCTION_NAME'))
-
-# Allowed hosts — add your API Gateway URL and custom domain
-ALLOWED_HOSTS = [
-    'localhost',
-    '127.0.0.1',
-    '.execute-api.us-east-1.amazonaws.com',   # API Gateway URL
-    'api.arhatinfo.com',                        # your custom domain
-    '*.arhat.info',
-    '*.run.app',
-    'dev.arhat.info',
-    'lrk6jg5p7z25wg3cq5d47cfhe40xyraw.lambda-url.us-east-1.on.aws',
-    '75hmr4ydr5.execute-api.us-east-1.amazonaws.com',
-    'chatbot-arhatinfo-xzkib7kizq-uk.a.run.app',
-    config('ALLOWED_HOSTS', default=''),
-]
-
-# Database — use RDS PostgreSQL on production
-# Lambda cannot connect to localhost
-DATABASES = {
-    'default': {
-        'ENGINE':   'django.db.backends.postgresql',
-        'NAME':     config('DB_NAME'),
-        'USER':     config('DB_USER'),
-        'PASSWORD': config('DB_PASSWORD'),
-        'HOST':     config('DB_HOST'),        # RDS endpoint
-        'PORT':     config('DB_PORT', default='5432'),
-    }
-}
-
-
-
-# CORS — allow your Firebase frontend
-CORS_ALLOWED_ORIGINS = [
-    'https://arhat.info',
-    'https://www.arhat.info',
-    'https://arhatinfo.web.app',
-    'https://arhatinfo.firebaseapp.com',
-    'http://localhost:3000',
-    'https://*.arhat.info',
-    'https://*.run.app',
-    'https://arhatinfo.com'
-]
-CORS_ALLOW_CREDENTIALS = True
-
-# Security
-SECURE_SSL_REDIRECT            = False   # API Gateway handles SSL
-SESSION_COOKIE_SECURE          = True
-CSRF_COOKIE_SECURE             = True
-SECURE_HSTS_SECONDS            = 31536000
-SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+USE_S3 = config('USE_S3', default=False, cast=bool)
+if USE_S3:
+    AWS_ACCESS_KEY_ID        = config('AWS_ACCESS_KEY_ID')
+    AWS_SECRET_ACCESS_KEY    = config('AWS_SECRET_ACCESS_KEY')
+    AWS_STORAGE_BUCKET_NAME  = config('AWS_STORAGE_BUCKET_NAME')
+    AWS_S3_REGION_NAME       = config('AWS_S3_REGION_NAME', default='us-east-1')
+    AWS_S3_CUSTOM_DOMAIN     = f'{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com'
+    AWS_DEFAULT_ACL          = 'public-read'
+    AWS_S3_OBJECT_PARAMETERS = {'CacheControl': 'max-age=86400'}
+    STATICFILES_STORAGE      = 'storages.backends.s3boto3.S3Boto3Storage'
+    DEFAULT_FILE_STORAGE     = 'storages.backends.s3boto3.S3Boto3Storage'
